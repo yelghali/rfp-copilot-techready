@@ -11,6 +11,7 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, ContentSett
 import urllib.parse
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
 from utilities.helpers.ConfigHelper import ConfigHelper
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,7 +26,68 @@ mod_page_style = """
             </style>
             """
 st.markdown(mod_page_style, unsafe_allow_html=True)
-    
+
+
+
+import json
+import io
+import openpyxl
+from openpyxl import load_workbook
+
+def process_excel_bytes(excel_bytes):
+    workbook = load_workbook(filename=io.BytesIO(excel_bytes))
+    excel_data = {}
+
+    for sheet in workbook.sheetnames:
+        worksheet = workbook[sheet]
+        sheet_data = {}
+
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if cell.value is not None:
+                    cell_coordinate = cell.coordinate
+                    sheet_data[cell_coordinate] = cell.value
+
+        excel_data[sheet] = sheet_data
+
+    return json.dumps(excel_data, ensure_ascii=False)
+
+
+
+def save_excel_json_to_cosmos(filename, excel_json_represenation):
+    #backend_url = urllib.parse.urljoin(os.getenv('BACKEND_URL','http://localhost:7071'), "/api/ExtractRFPQuestions")
+    backend_url = urllib.parse.urljoin(os.getenv('EXCEL_PROCESSING_BACKEND_URL','http://localhost:8082'), "/api/ExtractRFPQuestions")
+
+    print("BACKEND URL ######################### IS %s" % backend_url)
+
+    params = {}
+    if os.getenv('FUNCTION_KEY') != None:
+        params['code'] = os.getenv('FUNCTION_KEY')
+        params['clientId'] = "clientKey"
+    headers = {'Content-Type': 'application/json'}
+
+    # Convert JSON string to dictionary
+    excel_json_to_push = {}
+
+    # Add id and name fields to the JSON data
+    name = filename.lower().replace(' ', '-')
+    excel_json_to_push['id'] = name
+    excel_json_to_push['documentname'] = name
+    excel_json_to_push["documentcontent"] = json.loads(excel_json_represenation)
+
+    try:
+        response = requests.post(backend_url, params=params, data=json.dumps(excel_json_to_push), headers=headers)
+        if response.status_code == 200:
+            st.success(f"{response.text}\nPlease note this is a multi-step process and may take a few minutes to complete.")
+        else:
+            st.error(f"Error: {response.text}")
+        st.session_state['filename'] = filename
+    except Exception as e:
+        st.error(traceback.format_exc())
+            
+
+
+
 def remote_convert_files_and_add_embeddings(process_all=False):
     backend_url = urllib.parse.urljoin(os.getenv('BACKEND_URL','http://localhost:7071'), "/api/BatchStartProcessing")
     params = {}
@@ -83,7 +145,7 @@ def upload_file(bytes_data: bytes, file_name: str, content_type: Optional[str] =
     st.session_state['file_url'] = blob_client.url + '?' + generate_blob_sas(account_name, container_name, file_name,account_key=account_key,  permission="r", expiry=datetime.utcnow() + timedelta(hours=3))
 
 try:
-    with st.expander("Add documents in Batch", expanded=True):
+    with st.expander("Add Internal knowledge documents in Batch", expanded=True):
         config = ConfigHelper.get_active_config_or_default()
         file_type = [processor.document_type for processor in config.document_processors]
         uploaded_files = st.file_uploader("Upload a document to add it to the Azure Storage Account, compute embeddings and add them to the Azure AI Search index. Check your configuration for available document processors.", type=file_type, accept_multiple_files=True)
@@ -103,6 +165,8 @@ try:
         with col3:
             st.button("Reprocess all documents in the Azure Storage account", on_click=remote_convert_files_and_add_embeddings, args=(True,))
 
+
+
     with st.expander("Add URLs to the knowledge base", expanded=True):
         col1, col2 = st.columns([3,1])
         with col1: 
@@ -111,6 +175,37 @@ try:
         with col2:
             st.selectbox('Embeddings models', [os.getenv('AZURE_OPENAI_EMBEDDING_MODEL')], disabled=True)
             st.button("Process and ingest web pages", on_click=add_urls, key="add_url")
+
+
+
+    with st.expander("Add RFP Questionnaires(.xlsx)", expanded=True):
+        config = ConfigHelper.get_active_config_or_default()
+        #file_type = [processor.document_type for processor in config.document_processors]
+        file_type = ['xlsx']
+        uploaded_files = st.file_uploader("Upload an Excel file to extract all the RFP questions from the file into the internal CosmosDB", type=file_type, accept_multiple_files=True)
+        if uploaded_files is not None:
+            for up in uploaded_files:
+                # To read file as bytes:
+                bytes_data = up.getvalue()
+                if st.session_state.get('filename', '') != up.name:
+                    # Upload a new file
+                    #upload_file(bytes_data, up.name)
+                    excel_json_represenation = process_excel_bytes(bytes_data)
+                    save_excel_json_to_cosmos(up.name, excel_json_represenation)
+                    print(excel_json_represenation)
+            #     if st.session_state.get('filename', '') != up.name:
+            #         # Upload a new file
+            #         upload_file(bytes_data, up.name)
+            # if len(uploaded_files) > 0:
+            #     st.success(f"{len(uploaded_files)} documents uploaded. Embeddings computation in progress. \nPlease note this is an asynchronous process and may take a few minutes to complete.\nYou can check for further details in the Azure Function logs.")
+
+        col1, col2 = st.columns([2,1])
+        # with col1:
+        #     st.button("Process and ingest new files", on_click=remote_convert_files_and_add_embeddings)
+        #with col3:
+        #    st.button("Reprocess all documents in the Azure Storage account", on_click=extract_questions_from_rfp_excel, args=(True,))
+
+
 
 except Exception as e:
     st.error(traceback.format_exc())

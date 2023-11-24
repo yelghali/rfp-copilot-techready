@@ -1,20 +1,26 @@
 version: "0.1"
 name: rag
 services:
-  web:
-    image: fruoccopublic.azurecr.io/rag-webapp
-    ports:
-      - "8080:80"
-    env_file:
-      - ../.env
-  admin:
-    image: fruoccopublic.azurecr.io/rag-adminwebapp
-    ports:
-      - "8081:80"
-    env_file:
-      - ../.env
+  # web:
+  #   image: fruoccopublic.azurecr.io/rag-webapp
+  #   ports:
+  #     - "8080:80"
+  #   env_file:
+  #     - ../.env
+  # admin:
+  #   #image: fruoccopublic.azurecr.io/rag-adminwebapp
+  #   build:
+  #     context: ../
+  #     dockerfile: ./docker/AdminWebApp.Dockerfile
+  #   ports:
+  #     - "8081:80"
+  #   env_file:
+  #     - ../.env
   backend:
-    image: fruoccopublic.azurecr.io/rag-backend
+    #image: fruoccopublic.azurecr.io/rag-backend
+    build:
+      context: ../
+      dockerfile: ./docker/Backend.Dockerfile
     ports: 
       - "8082:80"
     env_file:
